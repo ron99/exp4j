@@ -18,9 +18,8 @@ package net.objecthunter.exp4j;
 import java.util.*;
 import java.util.concurrent.*;
 
-import net.objecthunter.exp4j.function.Function;
-import net.objecthunter.exp4j.function.Functions;
-import net.objecthunter.exp4j.operator.Operator;
+import net.objecthunter.exp4j.function.*;
+import net.objecthunter.exp4j.operator.*;
 import net.objecthunter.exp4j.tokenizer.*;
 
 public class Expression {
@@ -208,4 +207,348 @@ public class Expression {
         }
         return args;
     }
+    
+    
+    /**
+     * Creates derivative <code>Expression</code> to this  <code>Expression</code> with respect to the given variable.
+     * <p>Current support only for the built-in operators and functions</p>
+     * 
+     * @param variable the variable which the  <code>Expression</code> is derivative by (all other variables will be treated as constants)
+     * @return the derivative  <code>Expression</code> to this  <code>Expression</code>
+     * @throws IllegalArgumentException if the  <code>Expression</code> or the given variable are not valid
+     * @throws UnsupportedOperationException if the  <code>Expression</code> contains not built-in operator or function
+     */
+    public Expression derivative(final String variable) throws IllegalArgumentException, UnsupportedOperationException {
+    	ValidationResult validation = this.validate(false);
+    	if(!validation.isValid())
+    		throw new IllegalArgumentException("The expression is invalid for the following reasons: "+validation.getErrors());
+    	
+    	if(variable.matches("π|pi|e|φ"))
+    		throw new IllegalArgumentException("Cannot derivative by the variable '"+variable+"' because it's a constant");
+    	
+    	
+		List<Token> tokens = new ArrayList<Token>(Arrays.asList(this.tokens));
+		
+		Expression derivative = new Expression(derivative(tokens, variable).toArray(new Token[0]));
+		derivative.setVariables(this.variables);
+		return derivative;
+	}
+    
+    private List<Token> derivative(List<Token> tokens, final String var) {
+		Token token = tokens.get(tokens.size()-1);
+		
+		switch (token.getType()){
+			case Token.TOKEN_OPERATOR:
+				List<List<Token>> args = getTokensArguments(tokens.subList(0, tokens.size()-1), ((OperatorToken) token).getOperator().getNumOperands());
+				return derivative(((OperatorToken) token).getOperator(), args.get(0), args.get(1), var);
+				
+			case Token.TOKEN_FUNCTION: 
+				return derivative(((FunctionToken) token).getFunction(), tokens.subList(0, tokens.size()-1), var);
+				
+			case Token.TOKEN_VARIABLE:
+				if(((VariableToken) token).getName().equals(var))
+					return new ArrayList<Token>(Arrays.asList((Token) new NumberToken(1d)));
+				
+			case Token.TOKEN_NUMBER:
+				return new ArrayList<Token>(Arrays.asList((Token) new NumberToken(0d)));
+				
+			default:
+				throw new UnsupportedOperationException("The token type '"+token.getClass().getName()+"' is not derivative supported yet");
+		}
+	}
+    
+    private List<Token> derivative(Operator operator, List<Token> leftTokens, List<Token> rightTokens, final String var) {
+    	List<Token> dTokens = new ArrayList<Token>();
+    	
+	    switch (operator.getSymbol()) {
+			case "+":
+				dTokens.addAll(derivative(leftTokens, var));
+				if(operator.getNumOperands() == 2) {
+					dTokens.addAll(derivative(rightTokens, var));
+				}
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('+', operator.getNumOperands())));
+				break;
+				
+			case "-":
+				dTokens.addAll(derivative(leftTokens, var));
+				if(operator.getNumOperands() == 2) {
+					dTokens.addAll(derivative(rightTokens, var));
+				}
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('-', operator.getNumOperands())));
+				break;
+				
+			case "*":
+				dTokens.addAll(derivative(leftTokens, var));
+				dTokens.addAll(rightTokens);
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				dTokens.addAll(leftTokens);
+				dTokens.addAll(derivative(rightTokens, var));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('+', 2)));
+				break;
+			
+			case "/":
+				dTokens.addAll(derivative(leftTokens, var));
+				dTokens.addAll(rightTokens);
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				dTokens.addAll(leftTokens);
+				dTokens.addAll(derivative(rightTokens, var));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('-', 2)));
+				dTokens.addAll(rightTokens);
+				dTokens.add(new NumberToken(2d));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('^', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('/', 2)));
+				break;
+				
+			case "^":
+				dTokens.addAll(leftTokens);
+				dTokens.addAll(rightTokens);
+				dTokens.add(new NumberToken(1d));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('-', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('^', 2)));
+				dTokens.addAll(rightTokens);
+				dTokens.addAll(derivative(leftTokens, var));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				dTokens.addAll(leftTokens);
+				dTokens.addAll(leftTokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("log")));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				dTokens.addAll(derivative(rightTokens, var));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('+', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				break;
+			
+			case "%":
+				dTokens.addAll(leftTokens);
+				dTokens.addAll(rightTokens);
+				dTokens.addAll(leftTokens);
+				dTokens.addAll(rightTokens);
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('/', 2)));
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("floor")));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('-', 2)));
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("abs")));
+				dTokens.addAll(leftTokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("signum")));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+				return derivative(dTokens, var);
+				
+			default:
+				throw new UnsupportedOperationException("The operator '"+operator.getSymbol()+"' is not derivative supported yet");
+    	}
+	    
+	    return dTokens;
+	}
+    
+    private List<Token> derivative(Function function, List<Token> tokens, final String var) {
+    	List<Token> dTokens = derivative(tokens, var);
+    	
+		switch (function.getName()) {
+			case "sqrt":
+			case "cbrt":
+			case "exp":
+			case "expm1":
+				switch (function.getName()) {
+					case "sqrt":
+						tokens.add(new NumberToken(1d/2));
+						break;
+						
+					case "cbrt":
+						tokens.add(new NumberToken(1d/3));
+						break;
+						
+					case "exp":
+					case "expm1":
+						tokens.add(0, new VariableToken("e"));
+						break;
+				}
+			case "pow":
+				tokens.add(new OperatorToken(Operators.getBuiltinOperator('^', 2)));
+				return derivative(tokens, var);
+		
+			case "sin":
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("cos")));
+				break;
+				
+			case "cos":
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("sin")));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('-', 1)));
+				break;
+				
+			case "tan":
+				dTokens.add(new NumberToken(1d));
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("cos")));
+				dTokens.add(new NumberToken(2d));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('^', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('/', 2)));
+				break;
+				
+			case "asin":
+				dTokens.add(new NumberToken(1d));
+				dTokens.add(new NumberToken(1d));
+				dTokens.addAll(tokens);
+				dTokens.add(new NumberToken(2d));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('^', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('-', 2)));
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("sqrt")));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('/', 2)));
+				break;
+				
+			case "acos":
+				dTokens.addAll(derivative(new FunctionToken(Functions.getBuiltinFunction("asin")).getFunction(), tokens, var));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('-', 1)));
+				break;
+				
+			case "atan":
+				dTokens.add(new NumberToken(1d));
+				dTokens.addAll(tokens);
+				dTokens.add(new NumberToken(2d));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('^', 2)));
+				dTokens.add(new NumberToken(1d));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('+', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('/', 2)));
+				break;
+				
+			case "sinh":
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("cosh")));
+				break;
+				
+			case "cosh":
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("sinh")));
+				break;
+				
+			case "tanh":
+				dTokens.add(new NumberToken(1d));
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("cosh")));
+				dTokens.add(new NumberToken(2d));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('^', 2)));
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('/', 2)));
+				break;
+				
+			case "log":
+			case "log2":
+			case "log10":
+			case "log1p":
+				dTokens.add(new NumberToken(1d));
+				dTokens.addAll(tokens);
+				switch (function.getName()) {
+					case "log2":
+						dTokens.add(new NumberToken(Math.log(2)));
+						dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+						
+					case "log10":
+						dTokens.add(new NumberToken(Math.log(10)));
+						dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+						
+					case "log1p":
+						dTokens.add(new NumberToken(1d));
+						dTokens.add(new OperatorToken(Operators.getBuiltinOperator('+', 2)));
+				}
+				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('/', 2)));
+			
+			case "abs":
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(Functions.getBuiltinFunction("signum")));
+				break;
+				
+			case "signum":
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(new Function("delta") {
+					
+					@Override
+					public double apply(double... args) {
+						if(args[0] != 0d)
+							return 0d;
+						else
+							return Double.POSITIVE_INFINITY;
+					}
+				}));
+				break;
+				
+			case "floor":
+				dTokens.addAll(tokens);
+				dTokens.add(new FunctionToken(new Function("floorDerivative") {
+					
+					@Override
+					public double apply(double... args) {
+						if(args[0] != (int)args[0])
+							return 0d;
+						else
+							return Double.NaN;
+					}
+				}));
+				break;
+			
+			case "ceil":
+				tokens.add(new OperatorToken(Operators.getBuiltinOperator('-', 1)));
+				tokens.add(new FunctionToken(Functions.getBuiltinFunction("floor")));
+				tokens.add(new OperatorToken(Operators.getBuiltinOperator('-', 1)));
+				return derivative(tokens, var);
+				
+			default:
+				throw new UnsupportedOperationException("The function '"+function.getName()+"' is not derivative supported");
+		}
+		
+		dTokens.add(new OperatorToken(Operators.getBuiltinOperator('*', 2)));
+		return dTokens;
+	}
+
+    
+    private List<List<Token>> getTokensArguments(List<Token> tokens, int numOperands) {
+    	List<List<Token>> tArgs = new ArrayList<List<Token>>(2);
+    	if(numOperands == 1) {
+    		tArgs.add(tokens);
+	        tArgs.add(new ArrayList<Token>(0));
+    	}
+    	else {
+	    	int last = 0;
+			final ArrayStack output = new ArrayStack();
+	        for (int i = 0; i < tokens.size()-1; i++) {
+	            Token t = tokens.get(i);
+	            switch (t.getType()) {
+		            case Token.TOKEN_NUMBER:
+		                output.push(((NumberToken) t).getValue());
+		                break;
+		                
+		            case Token.TOKEN_VARIABLE:
+		                output.push(1d);
+		                break;
+		                
+		            case Token.TOKEN_OPERATOR:
+		                Operator operator = ((OperatorToken) t).getOperator();
+		                if (operator.getNumOperands() == 2) 
+		                    output.push(operator.apply(output.pop(), output.pop()));
+		                else if (operator.getNumOperands() == 1) 
+		                    output.push(operator.apply(output.pop()));
+		                break;
+		                
+		            case Token.TOKEN_FUNCTION:
+		                FunctionToken func = (FunctionToken) t;
+		                double[] args = new double[func.getFunction().getNumArguments()];
+		                for (int j = 0; j < func.getFunction().getNumArguments(); j++) {
+		                    args[j] = output.pop();
+		                }
+		                output.push(func.getFunction().apply(this.reverseInPlace(args)));
+		                break;
+		        }
+	            if(output.size() == 1) {
+	            	last = i;
+	            }
+	        }
+	        
+	        tArgs.add(tokens.subList(0, last+1));
+	        tArgs.add(tokens.subList(last+1, tokens.size()));
+    	}
+    	
+    	return tArgs;
+	}
+    
 }
