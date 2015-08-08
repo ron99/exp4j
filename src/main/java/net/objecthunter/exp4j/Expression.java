@@ -453,6 +453,7 @@ public class Expression {
 						dTokens.add(new OperatorToken(Operators.getBuiltinOperator('+', 2)));
 				}
 				dTokens.add(new OperatorToken(Operators.getBuiltinOperator('/', 2)));
+				break;
 			
 			case "abs":
 				dTokens.addAll(tokens);
